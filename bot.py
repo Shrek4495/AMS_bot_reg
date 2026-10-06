@@ -7,7 +7,8 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ChatMemberStatus
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.enums import ChatMemberStatus  # ИСПРАВЛЕНО: перенесено из types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 API_TOKEN = "8968729833:AAGJbrjRAHIrc1VIu7HDWQt8tZbBkOKASis"
@@ -104,8 +105,7 @@ async def is_admin(message: types.Message):
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
-    # ИСПРАВЛЕНО: было dp.fsm.clear(...)
-    await state.clear() 
+    await state.clear()
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("👋 Добро пожаловать в меню регистрации!", reply_markup=keyboard)
 
@@ -162,7 +162,6 @@ async def cmd_export(message: types.Message):
 
 @dp.callback_query(F.data == "user_restart")
 async def process_restart(callback: types.CallbackQuery, state: FSMContext):
-    # ИСПРАВЛЕНО: было dp.fsm.clear(...)
     await state.clear()
     await callback.message.edit_text("🔄 Меню успешно перезапущено.")
     keyboard = get_main_keyboard(callback.from_user.id)
@@ -239,7 +238,6 @@ async def process_tag(message: types.Message, state: FSMContext):
 
     if any(p for p in participants_list if p['nickname'] == nickname):
         await message.answer("❗ Никнейм уже занят в основном списке.")
-        # ИСПРАВЛЕНО: было state.finish()
         await state.clear()
         keyboard = get_main_keyboard(message.from_user.id)
         await message.answer("Выберите действие:", reply_markup=keyboard)
@@ -247,7 +245,6 @@ async def process_tag(message: types.Message, state: FSMContext):
 
     if any(r for r in reserve_list if r['nickname'] == nickname):
         await message.answer("❗ Этот никнейм уже есть в резерве.")
-        # ИСПРАВЛЕНО: было state.finish()
         await state.clear()
         keyboard = get_main_keyboard(message.from_user.id)
         await message.answer("Выберите действие:", reply_markup=keyboard)
@@ -256,7 +253,6 @@ async def process_tag(message: types.Message, state: FSMContext):
     if len(participants_list) >= MAX_PARTICIPANTS:
         await message.answer("❌ Места в основном составе закончились. Добавляем в резерв.")
         await add_to_reserve_logic(message, nickname, tag)
-        # ИСПРАВЛЕНО: было state.finish()
         await state.clear()
         return
 
@@ -269,7 +265,6 @@ async def process_tag(message: types.Message, state: FSMContext):
     save_users(users_db)
 
     await message.answer(f"✅ Регистрация прошла успешно! Вы под номером {participant_number}.")
-    # ИСПРАВЛЕНО: было state.finish()
     await state.clear()
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("Выберите действие:", reply_markup=keyboard)
@@ -318,7 +313,6 @@ async def reserve_tag(message: types.Message, state: FSMContext):
 
     if any(r for r in reserve_list if r['nickname'] == nickname):
         await message.answer("❗ Этот никнейм уже есть в резерве.")
-        # ИСПРАВЛЕНО: было state.finish()
         await state.clear()
         keyboard = get_main_keyboard(message.from_user.id)
         await message.answer("Выберите действие:", reply_markup=keyboard)
@@ -333,7 +327,6 @@ async def reserve_tag(message: types.Message, state: FSMContext):
     save_users(users_db)
 
     await message.answer(f"✅ Вы добавлены в резерв под номером {reserve_number}.")
-    # ИСПРАВЛЕНО: было state.finish()
     await state.clear()
     
     keyboard = get_main_keyboard(message.from_user.id)
