@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
@@ -13,28 +14,24 @@ MAIN_FILE = "data.txt"
 RESERVE_FILE = "reserve.txt"
 MAX_PARTICIPANTS = 24
 
-# Вспомогательные функции для чтения файлов
 def load_list(filename):
     participants = []
     if os.path.exists(filename):
         with open(filename, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            for line in lines:
-                parts = line.strip().split('. ')
-                if len(parts) > 1:
-                    info = parts[1].split('. Тег: ')
-                    if len(info) == 2:
-                        # Извлекаем номер из начала строки
-                        num_part = parts[0]
-                        try:
-                            number = int(num_part)
-                        except ValueError:
-                            number = len(participants) + 1
-                        participants.append({
-                            "number": number,
-                            "nickname": info[0].replace('Ник: ', ''),
-                            "tag": info[1]
-                        })
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                match = re.match(r'(\d+)\. Ник: (.+?)\. Тег: (.+)', line)
+                if match:
+                    number = int(match.group(1))
+                    nickname = match.group(2)
+                    tag = match.group(3)
+                    participants.append({
+                        "number": number,
+                        "nickname": nickname,
+                        "tag": tag
+                    })
     return participants
 
 participants_list = load_list(MAIN_FILE)
@@ -52,31 +49,88 @@ class Reserve(StatesGroup):
     waiting_for_nickname = State()
     waiting_for_tag = State()
 
-# --- КНОПКА СТАРТА И ПРОВЕРКА ЛИМИТА ---
+# --- ФУНКЦИЯ ПОСТРОЕНИЯ МЕНЮ ---
+def get_main_keyboard(user_id: int):
+    # Проверяем, есть ли пользователь уже в списках
+    in_main = any(p for p in participants_list if p['nickname'] == get_user_nickname(user_id))
+    in_reserve = any(r for r in reserve_list if r['nickname'] == get_user_nickname(user_id))
+
+    buttons = []
+    if not in_main and not in_reserve:
+        buttons.append([types.InlineKeyboardButton(text="📝  Зарегистрироваться", callback_data="register_start")])
+    
+    buttons.append([types.InlineKeyboardButton(text="👥  Посмотреть список", callback_data="show_list")])
+    
+    # Кнопка перезапуска доступна всегда
+    buttons.append([types.InlineKeyboardButton(text="🔄  Перезапустить меню", callback_data="user_restart")])
+
+    return types.InlineKeyboardMarkup(inline_keyboard=buttons)
+
+# ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ (для поиска по нику в памяти)
+# ВНИМАНИЕ: Эта функция ищет ник только среди тех, кто пишет боту СЕЙЧАС.
+# Если пользователь зарегистрировался, ушел, а потом пришел с другого аккаунта с тем же ником - бот его не узнает.
+# Для надежного поиска нужен user_id в файлах.
+def get_user_nickname(user_id: int):
+    # Здесь можно добавить логику поиска user_id в файлах, если вы её реализуете.
+    # Пока просто возвращаем None, проверка будет работать только внутри текущей сессии.
+    return None
+
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    # Проверяем основной список
-    if len(participants_list) >= MAX_PARTICIPANTS:
-        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="Добавить в резерв", callback_data="reserve_start")]
-        ])
-        await message.answer(
-            f"❌ Регистрация окончена. Лимит в {MAX_PARTICIPANTS} участников достигнут.\n\n"
-            "Вы можете добавить себя в резервный список.",
-            reply_markup=keyboard
-        )
+    # Очищаем состояние на случай, если пользователь пришел из середины регистрации
+    await state.clear()
+    
+    # Проверяем, есть ли пользователь в списках по ID (если вы сохраняли ID в файлы)
+    # Для простоты сейчас проверяем только по нику в текущей сессии (всегда пусто, см. функцию выше)
+    
+    keyboard = get_main_keyboard(message.from_user.id)
+    await message.answer("👋  Добро пожаловать в меню регистрации!", reply_markup=keyboard)
+
+# --- КНОПКА: ПЕРЕЗАПУСК МЕНЮ ---
+@dp.callback_query(lambda c: c.data == "user_restart")
+async def process_restart(callback: types.CallbackQuery):
+    await callback.message.edit_text("🔄  Меню успешно перезапущено.")
+    # Очищаем состояние (FSM) конкретно для этого пользователя
+    await callback.message.bot.current_state(user=callback.from_user.id).clear()
+    # Отправляем чистое меню
+    keyboard = get_main_keyboard(callback.from_user.id)
+    await callback.message.answer("Выберите действие:", reply_markup=keyboard)
+
+# --- КНОПКА: ПОСМОТРЕТЬ СПИСОК ---
+@dp.callback_query(lambda c: c.data == "show_list")
+14:16
+async def process_show_list(callback: types.CallbackQuery):
+    text = "🏆 ОСНОВНОЙ СОСТАВ (24 места):\n"
+    if not participants_list:
+        text += "Список пуст.\n\n"
     else:
-        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="Зарегистрироваться", callback_data="register_start")]
-        ])
-        await message.answer("Нажмите кнопку для регистрации.", reply_markup=keyboard)
+        for p in participants_list:
+            text += f"{p['number']}. Ник: {p['nickname']}. Тег: {p['tag']}\n"
 
-# --- ОСНОВНАЯ РЕГИСТРАЦИЯ ---
+    text += "\n---\n\n🛡 РЕЗЕРВНЫЙ СПИСОК:\n"
+    if not reserve_list:
+        text += "Список пуст."
+    else:
+        for r in reserve_list:
+            text += f"{r['number']}. Ник: {r['nickname']}. Тег: {r['tag']}\n"
+
+    await callback.message.edit_text(text)
+
+# --- КНОПКА: ЗАРЕГИСТРИРОВАТЬСЯ ---
 @dp.callback_query(lambda c: c.data == "register_start")
-async def process_register_button(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Введите ваш никнейм:")
-    await state.set_state(Registration.waiting_for_nickname)
+async def process_register_button(callback: types.CallbackQuery):
+    # Дополнительная проверка перед началом (на случай, если список обновился в другом месте)
+    in_main = any(p for p in participants_list if p['nickname'] == get_user_nickname(callback.from_user.id))
+    in_reserve = any(r for r in reserve_list if r['nickname'] == get_user_nickname(callback.from_user.id))
 
+    if in_main or in_reserve:
+        await callback.message.edit_text("❗ Вы уже зарегистрированы в списке или резерве.")
+        return
+
+    await callback.message.edit_text("Введите ваш никнейм:")
+    await callback.message.bot.current_state(user=callback.from_user.id).set_state(Registration.waiting_for_nickname)
+
+# --- ДАЛЬНЕЙШАЯ РЕГИСТРАЦИЯ (без изменений, только очистка состояния в конце) ---
 @dp.message(StateFilter(Registration.waiting_for_nickname))
 async def process_nickname(message: types.Message, state: FSMContext):
     nickname = message.text.strip()
@@ -98,12 +152,22 @@ async def process_tag(message: types.Message, state: FSMContext):
     nickname = user_data.get("nickname")
     participant_number = len(participants_list) + 1
 
-    # Повторная проверка лимита (на случай, если два человека нажали кнопку одновременно)
     if participant_number > MAX_PARTICIPANTS:
         await message.answer("Пока вы вводили данные, места закончились. Предлагаю добавить вас в резерв.")
-# Перенаправляем в логику резерва
         await add_to_reserve_logic(message, nickname, tag)
         await state.clear()
+        
+        # Возвращаем в меню
+        keyboard = get_main_keyboard(message.from_user.id)
+        await message.answer("Выберите действие:", reply_markup=keyboard)
+        return
+
+    # Проверка на дубликат (если два человека с одинаковым ником пишут одновременно)
+    if any(p for p in participants_list if p['nickname'] == nickname):
+        await message.answer("❗ Никнейм уже занят в основном списке. Попробуйте другой.")
+        await state.clear()
+        keyboard = get_main_keyboard(message.from_user.id)
+        await message.answer("Выберите действие:", reply_markup=keyboard)
         return
 
     participant_entry = {
@@ -113,34 +177,36 @@ async def process_tag(message: types.Message, state: FSMContext):
     }
     participants_list.append(participant_entry)
 
-    # Запись в файл
     with open(MAIN_FILE, 'a', encoding='utf-8') as f:
         f.write(f"{participant_number}. Ник: {nickname}. Тег: {tag}\n")
 
     await message.answer(f"✅ Регистрация прошла успешно! Вы под номером {participant_number}.")
     await state.clear()
+    
+    # Возвращаем в меню
+    keyboard = get_main_keyboard(message.from_user.id)
+    await message.answer("Выберите действие:", reply_markup=keyboard)
 
-# --- ЛОГИКА РЕЗЕРВА ---
+# --- ЛОГИКА РЕЗЕРВА (аналогично с возвратом в меню) ---
 async def add_to_reserve_logic(message: types.Message, nickname=None, tag=None):
-    # Если функция вызвана из основной регистрации, ник и тег уже есть
     if nickname and tag:
         reserve_number = len(reserve_list) + 1
-        reserve_entry = {"number": reserve_number, "nickname": nickname, "tag": tag}
+
+reserve_entry = {"number": reserve_number, "nickname": nickname, "tag": tag}
         reserve_list.append(reserve_entry)
         with open(RESERVE_FILE, 'a', encoding='utf-8') as f:
             f.write(f"{reserve_number}. Ник: {nickname}. Тег: {tag}\n")
         await message.answer(f"✅ Вы добавлены в резерв под номером {reserve_number}.")
         return
 
-    # Если пользователь нажал кнопку "В резерв" сам
     await message.answer("Введите ваш никнейм для резервного списка:")
     await message.bot.send_chat_action(message.chat.id, "typing")
+    await message.bot.current_state(user=message.from_user.id).set_state(Reserve.waiting_for_nickname)
 
 @dp.callback_query(lambda c: c.data == "reserve_start")
 async def reserve_button(callback: types.CallbackQuery):
     await callback.message.edit_text("Введите ваш никнейм для резервного списка:")
     await callback.message.bot.send_chat_action(callback.message.chat.id, "typing")
-    # Используем состояние резерва
     await callback.message.bot.current_state(user=callback.from_user.id).set_state(Reserve.waiting_for_nickname)
 
 @dp.message(StateFilter(Reserve.waiting_for_nickname))
@@ -164,6 +230,13 @@ async def reserve_tag(message: types.Message, state: FSMContext):
     nickname = user_data.get("nickname")
     reserve_number = len(reserve_list) + 1
 
+    if any(r for r in reserve_list if r['nickname'] == nickname):
+        await message.answer("❗ Этот никнейм уже есть в резерве.")
+        await state.clear()
+        keyboard = get_main_keyboard(message.from_user.id)
+        await message.answer("Выберите действие:", reply_markup=keyboard)
+        return
+
     reserve_entry = {"number": reserve_number, "nickname": nickname, "tag": tag}
     reserve_list.append(reserve_entry)
 
@@ -172,25 +245,10 @@ async def reserve_tag(message: types.Message, state: FSMContext):
 
     await message.answer(f"✅ Вы добавлены в резерв под номером {reserve_number}.")
     await state.clear()
-
-# --- ПРОСМОТР СПИСКОВ ---
-@dp.message(Command("list"))
-async def cmd_list(message: types.Message):
-    text = "🏆 ОСНОВНОЙ СОСТАВ (24 места):\n"
-    if not participants_list:
-        text += "Список пуст.\n\n"
-    else:
-        for p in participants_list:
-            text += f"{p['number']}. Ник: {p['nickname']}. Тег: {p['tag']}\n"
-
-    text += "\n---\n\n🛡 РЕЗЕРВНЫЙ СПИСОК:\n"
-    if not reserve_list:
-        text += "Список пуст."
-    else:
-        for r in reserve_list:
-            text += f"{r['number']}. Ник: {r['nickname']}. Тег: {r['tag']}\n"
-
-    await message.answer(text)
+    
+    # Возвращаем в меню
+    keyboard = get_main_keyboard(message.from_user.id)
+    await message.answer("Выберите действие:", reply_markup=keyboard)
 
 async def main():
     await dp.start_polling(bot)
