@@ -348,5 +348,12 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    # В aiogram 3.x вместо executor используется asyncio.run()
-    asyncio.run(main())
+    from aiogram import executor
+    # Запускаем вебхук на порту 8080 (стандартный для bothost)
+    start_webhook(
+        dispatcher=dp,
+        webhook_path="/webhook",
+        on_startup=lambda _: bot.set_webhook(url="https://example.com/webhook"), # Ссылка может быть любой, это временно
+        skip_updates=True,
+        port=8080
+    )
