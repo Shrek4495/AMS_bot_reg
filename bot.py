@@ -11,7 +11,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.enums import ChatMemberStatus  # ИСПРАВЛЕНО: перенесено из types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-API_TOKEN = "8968729833:AAGJbrjRAHIrc1VIu7HDWQt8tZbBkOKASis"
+API_TOKEN = "8294705765:AAGXgWlHrPDSASeW6I9Qen3RBN36eC6OMqU"
 ADMIN_IDS = {6723183204}  # Замените на свой Telegram ID
 
 # Файлы для хранения данных
