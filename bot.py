@@ -7,7 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 
-API_TOKEN = "ВАШ_API_ТОКЕН_ЗДЕСЬ"
+API_TOKEN = "8968729833:AAGJbrjRAHIrc1VIu7HDWQt8tZbBkOKASis"
 
 # Файлы для хранения данных
 MAIN_FILE = "data.txt"
