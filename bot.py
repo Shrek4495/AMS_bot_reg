@@ -19,7 +19,7 @@ RESERVE_FILE = "reserve.txt"
 USERS_FILE = "users.json"
 MAX_PARTICIPANTS = 24
 
-# Валидация тега
+# Валидация тега (8 символов: цифры и заглавные латинские буквы)
 TAG_REGEX = re.compile(r'^[0-9A-Z]{8}$')
 
 def load_list(filename):
@@ -57,7 +57,7 @@ def save_users(users):
     with open(USERS_FILE, 'w', encoding='utf-8') as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
 
-# Загрузка данных
+# Загрузка данных при старте
 participants_list = load_list(MAIN_FILE)
 reserve_list = load_list(RESERVE_FILE)
 users_db = load_users()
@@ -101,12 +101,10 @@ async def cmd_start(message: types.Message):
 
 @dp.message(Command("reload"))
 async def cmd_reload(message: types.Message):
-    # Проверка админа (в 3.x ChatMemberStatus импортируется из aiogram.types или aiogram.enums)
-    from aiogram.types import ChatMemberStatus
     if message.from_user.id not in ADMIN_IDS:
         try:
             member = await message.chat.get_member(message.from_user.id)
-            if member.status not in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+            if member.status not in ["administrator", "creator"]:
                 await message.answer("❌ У вас нет прав для этой команды.")
                 return
         except Exception:
@@ -121,11 +119,10 @@ async def cmd_reload(message: types.Message):
 
 @dp.message(Command("clear"))
 async def cmd_clear(message: types.Message):
-    from aiogram.types import ChatMemberStatus
     if message.from_user.id not in ADMIN_IDS:
         try:
             member = await message.chat.get_member(message.from_user.id)
-            if member.status not in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+            if member.status not in ["administrator", "creator"]:
                 await message.answer("❌ У вас нет прав для этой команды.")
                 return
         except Exception:
@@ -145,11 +142,10 @@ async def cmd_clear(message: types.Message):
 
 @dp.message(Command("export"))
 async def cmd_export(message: types.Message):
-    from aiogram.types import ChatMemberStatus
     if message.from_user.id not in ADMIN_IDS:
         try:
             member = await message.chat.get_member(message.from_user.id)
-            if member.status not in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+            if member.status not in ["administrator", "creator"]:
                 await message.answer("❌ У вас нет прав для этой команды.")
                 return
         except Exception:
@@ -344,16 +340,14 @@ async def reserve_tag(message: types.Message, state: FSMContext):
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("Выберите действие:", reply_markup=keyboard)
 
+# ФУНКЦИЯ СБРОСА СТАРЫХ СЕССИЙ (РЕШЕНИЕ CONFLICT)
+async def on_startup(bot: Bot):
+    # Эта строка принудительно удаляет старый Webhook (если он был) 
+    # и сбрасывает все зависшие сессии getUpdates, вызывающие Conflict.
+    await bot.delete_webhook(drop_pending_updates=True)
+
 async def main():
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, on_startup=on_startup)
 
 if __name__ == "__main__":
-    from aiogram import executor
-    # Запускаем вебхук на порту 8080 (стандартный для bothost)
-    start_webhook(
-        dispatcher=dp,
-        webhook_path="/webhook",
-        on_startup=lambda _: bot.set_webhook(url="https://example.com/webhook"), # Ссылка может быть любой, это временно
-        skip_updates=True,
-        port=8080
-    )
+    asyncio.run(main())
