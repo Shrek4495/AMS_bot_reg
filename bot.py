@@ -7,8 +7,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.enums import ChatMemberStatus  # ИСПРАВЛЕНО: перенесено из types
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ChatMemberStatus
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 API_TOKEN = "8294705765:AAGXgWlHrPDSASeW6I9Qen3RBN36eC6OMqU"
@@ -20,8 +19,8 @@ RESERVE_FILE = "reserve.txt"
 USERS_FILE = "users.json"
 MAX_PARTICIPANTS = 24
 
-# Валидация тега
-TAG_REGEX = re.compile(r'^[0-9A-Z]{8}$')
+# Валидация тега (УБРАНА ПРОВЕРКА НА 8 СИМВОЛОВ)
+TAG_REGEX = re.compile(r'^.+$') # Теперь тег просто не может быть пустым
 
 def load_list(filename):
     participants = []
@@ -80,8 +79,14 @@ def get_user_nickname(user_id: int):
 
 def get_main_keyboard(user_id: int):
     user_nick = get_user_nickname(user_id)
-    in_main = any(p for p in participants_list if p['nickname'] == user_nick)
-    in_reserve = any(r for r in reserve_list if r['nickname'] == user_nick)
+    
+    # Защита от падений, если ник не найден
+    if user_nick is None:
+        in_main = False
+        in_reserve = False
+    else:
+        in_main = any(p for p in participants_list if p['nickname'] == user_nick)
+        in_reserve = any(r for r in reserve_list if r['nickname'] == user_nick)
 
     builder = InlineKeyboardBuilder()
     if not in_main and not in_reserve:
@@ -188,10 +193,7 @@ async def process_show_list(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "register_start")
 async def process_register_button(callback: types.CallbackQuery, state: FSMContext):
     user_nick = get_user_nickname(callback.from_user.id)
-    in_main = any(p for p in participants_list if p['nickname'] == user_nick)
-    in_reserve = any(r for r in reserve_list if r['nickname'] == user_nick)
-
-    if in_main or in_reserve:
+    if user_nick and (any(p for p in participants_list if p['nickname'] == user_nick) or any(r for r in reserve_list if r['nickname'] == user_nick)):
         await callback.message.edit_text("❗ Вы уже зарегистрированы в списке или резерве.")
         return
 
@@ -201,10 +203,7 @@ async def process_register_button(callback: types.CallbackQuery, state: FSMConte
 @dp.callback_query(F.data == "reserve_start")
 async def process_reserve_button(callback: types.CallbackQuery, state: FSMContext):
     user_nick = get_user_nickname(callback.from_user.id)
-    in_main = any(p for p in participants_list if p['nickname'] == user_nick)
-    in_reserve = any(r for r in reserve_list if r['nickname'] == user_nick)
-
-    if in_main or in_reserve:
+    if user_nick and (any(p for p in participants_list if p['nickname'] == user_nick) or any(r for r in reserve_list if r['nickname'] == user_nick)):
         await callback.message.edit_text("❗ Вы уже зарегистрированы в списке или резерве.")
         return
 
@@ -224,12 +223,9 @@ async def process_nickname(message: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(Registration.waiting_for_tag))
 async def process_tag(message: types.Message, state: FSMContext):
-    tag = message.text.strip().upper()
+    tag = message.text.strip()
     if not tag:
         await message.answer("Тег не может быть пустым.")
-        return
-    if not TAG_REGEX.match(tag):
-        await message.answer("❗ Тег введен неверно. Он должен состоять из 8 цифр и заглавных латинских букв (пример: 1234ABCD).")
         return
 
     user_data = await state.get_data()
@@ -256,6 +252,7 @@ async def process_tag(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
+    # Регистрация в основной список
     participant_number = len(participants_list) + 1
     participant_entry = {"number": participant_number, "nickname": nickname, "tag": tag}
     participants_list.append(participant_entry)
@@ -265,6 +262,8 @@ async def process_tag(message: types.Message, state: FSMContext):
     save_users(users_db)
 
     await message.answer(f"✅ Регистрация прошла успешно! Вы под номером {participant_number}.")
+    
+    # ИСПРАВЛЕНО: Гарантированный возврат в меню
     await state.clear()
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("Выберите действие:", reply_markup=keyboard)
@@ -281,6 +280,11 @@ async def add_to_reserve_logic(message: types.Message, nickname=None, tag=None):
         save_users(users_db)
         
         await message.answer(f"✅ Вы добавлены в резерв под номером {reserve_number}.")
+        
+        # ИСПРАВЛЕНО: Гарантированный возврат в меню
+        await state.finish() if hasattr(message, 'state') else None
+        keyboard = get_main_keyboard(message.from_user.id)
+        await message.answer("Выберите действие:", reply_markup=keyboard)
         return
 
     await message.answer("Введите ваш никнейм для резервного списка:")
@@ -299,12 +303,9 @@ async def reserve_nickname(message: types.Message, state: FSMContext):
 
 @dp.message(StateFilter(Reserve.waiting_for_tag))
 async def reserve_tag(message: types.Message, state: FSMContext):
-    tag = message.text.strip().upper()
+    tag = message.text.strip()
     if not tag:
         await message.answer("Тег не может быть пустым.")
-        return
-    if not TAG_REGEX.match(tag):
-        await message.answer("❗ Тег введен неверно. Он должен состоять из 8 цифр и заглавных латинских букв (пример: 1234ABCD).")
         return
 
     user_data = await state.get_data()
@@ -327,8 +328,9 @@ async def reserve_tag(message: types.Message, state: FSMContext):
     save_users(users_db)
 
     await message.answer(f"✅ Вы добавлены в резерв под номером {reserve_number}.")
-    await state.clear()
     
+    # ИСПРАВЛЕНО: Гарантированный возврат в меню
+    await state.clear()
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("Выберите действие:", reply_markup=keyboard)
 
