@@ -101,7 +101,6 @@ async def process_tag(message: types.Message, state: FSMContext):
     # Повторная проверка лимита (на случай, если два человека нажали кнопку одновременно)
     if participant_number > MAX_PARTICIPANTS:
         await message.answer("Пока вы вводили данные, места закончились. Предлагаю добавить вас в резерв.")
-14:03
 # Перенаправляем в логику резерва
         await add_to_reserve_logic(message, nickname, tag)
         await state.clear()
