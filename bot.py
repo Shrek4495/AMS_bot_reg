@@ -98,7 +98,7 @@ async def process_restart(callback: types.CallbackQuery):
 
 # --- КНОПКА: ПОСМОТРЕТЬ СПИСОК ---
 @dp.callback_query(lambda c: c.data == "show_list")
-14:16
+
 async def process_show_list(callback: types.CallbackQuery):
     text = "🏆 ОСНОВНОЙ СОСТАВ (24 места):\n"
     if not participants_list:
