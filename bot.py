@@ -29,7 +29,7 @@ def load_list(filename):
                     nickname = match.group
 (2)
                     tag = match.group
-(3)
+(3)  # <-- Эта строка должна быть вровень с "number" и "nickname"
                     participants.append({
                         "number": number,
                         "nickname": nickname,
