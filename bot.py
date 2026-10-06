@@ -8,7 +8,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.enums import ChatMemberStatus  # ИСПРАВЛЕНО: импорт из enums
+from aiogram.enums import ChatMemberStatus  # Исправленный импорт
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 API_TOKEN = "8294705765:AAGXgWlHrPDSASeW6I9Qen3RBN36eC6OMqU"
@@ -20,8 +20,7 @@ RESERVE_FILE = "reserve.txt"
 USERS_FILE = "users.json"
 MAX_PARTICIPANTS = 24
 
-# Валидация тега (УБРАНА ПРОВЕРКА НА 8 СИМВОЛОВ)
-# Теперь тег просто не может быть пустым
+# Валидация тега (Убрана проверка на 8 символов, теперь просто не пустой)
 TAG_REGEX = re.compile(r'^.+$') 
 
 def load_list(filename):
@@ -50,14 +49,20 @@ def save_list(filename, data_list):
         print(f"Ошибка записи в файл {filename}: {e}")
 
 def load_users():
-    if os.path.exists(USERS_FILE):
+    if not os.path.exists(USERS_FILE):
+        return {}
+    try:
         with open(USERS_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
-    return {}
+    except (json.JSONDecodeError, IOError):
+        return {}
 
 def save_users(users):
-    with open(USERS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(users, f, ensure_ascii=False, indent=2)
+    try:
+        with open(USERS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(users, f, ensure_ascii=False, indent=2)
+    except IOError as e:
+        print(f"Ошибка записи в файл {USERS_FILE}: {e}")
 
 # Загрузка данных при старте
 participants_list = load_list(MAIN_FILE)
@@ -81,20 +86,24 @@ def get_user_nickname(user_id: int):
 
 def get_main_keyboard(user_id: int):
     user_nick = get_user_nickname(user_id)
-    
-    # Защита от ошибок, если ник еще не записан
-    if user_nick is None:
-        in_main = False
-        in_reserve = False
-    else:
-        in_main = any(p for p in participants_list if p['nickname'] == user_nick)
-        in_reserve = any(r for r in reserve_list if r['nickname'] == user_nick)
 
     builder = InlineKeyboardBuilder()
-    if not in_main and not in_reserve:
+    
+    # Если пользователь не найден в базе данных
+    if not user_nick:
         builder.button(text="📝 В основной список", callback_data="register_start")
         builder.button(text="➡️ Сразу в резерв", callback_data="reserve_start")
+    else:
+        # Если пользователь есть в базе, проверяем списки
+        in_main = any(p for p in participants_list if p['nickname'] == user_nick)
+        in_reserve = any(r for r in reserve_list if r['nickname'] == user_nick)
+        
+        if not in_main and not in_reserve:
+            # Если в списках его нет (рассинхрон), даем кнопки
+            builder.button(text="📝 В основной список", callback_data="register_start")
+            builder.button(text="➡️ Сразу в резерв", callback_data="reserve_start")
     
+    # Общие кнопки
     builder.button(text="👥 Посмотреть список", callback_data="show_list")
     builder.button(text="🔄 Перезапустить меню", callback_data="user_restart")
     
@@ -115,6 +124,20 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("👋 Добро пожаловать в меню регистрации!", reply_markup=keyboard)
+
+@dp.message(Command("resetme"))
+async def cmd_resetme(message: types.Message, state: FSMContext):
+    user_id = str(message.from_user.id)
+    if user_id in users_db:
+        del users_db[user_id]
+        save_users(users_db)
+        await state.clear()
+        await message.answer("✅ Ваша регистрация сброшена. Вы можете зарегистрироваться заново.")
+    else:
+        await message.answer("❗ Вы не найдены в базе зарегистрированных пользователей.")
+    
+    keyboard = get_main_keyboard(message.from_user.id)
+    await message.answer("Выберите действие:", reply_markup=keyboard)
 
 @dp.message(Command("reload"))
 async def cmd_reload(message: types.Message):
@@ -254,7 +277,6 @@ async def process_tag(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
-    # Регистрация в основной список
     participant_number = len(participants_list) + 1
     participant_entry = {"number": participant_number, "nickname": nickname, "tag": tag}
     participants_list.append(participant_entry)
@@ -265,7 +287,6 @@ async def process_tag(message: types.Message, state: FSMContext):
 
     await message.answer(f"✅ Регистрация прошла успешно! Вы под номером {participant_number}.")
     
-    # ВОЗВРАТ В МЕНЮ (исправлено)
     await state.clear()
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("Выберите действие:", reply_markup=keyboard)
@@ -283,7 +304,6 @@ async def add_to_reserve_logic(message: types.Message, nickname=None, tag=None):
         
         await message.answer(f"✅ Вы добавлены в резерв под номером {reserve_number}.")
         
-        # ВОЗВРАТ В МЕНЮ (исправлено)
         await state.clear()
         keyboard = get_main_keyboard(message.from_user.id)
         await message.answer("Выберите действие:", reply_markup=keyboard)
@@ -331,7 +351,6 @@ async def reserve_tag(message: types.Message, state: FSMContext):
 
     await message.answer(f"✅ Вы добавлены в резерв под номером {reserve_number}.")
     
-    # ВОЗВРАТ В МЕНЮ (исправлено)
     await state.clear()
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("Выберите действие:", reply_markup=keyboard)
