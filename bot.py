@@ -10,7 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-API_TOKEN = "8968723:AAGJbrjRAHIrc1VIu7HDWQt8tZbBkOKASis"
+API_TOKEN = "8968729833:AAGJbrjRAHIrc1VIu7HDWQt8tZbBkOKASis"
 ADMIN_IDS = {6723183204}  # Замените на свой Telegram ID
 
 # Файлы для хранения данных
