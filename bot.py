@@ -7,7 +7,8 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ChatMemberStatus
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.enums import ChatMemberStatus  # ИСПРАВЛЕНО: импорт из enums
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 API_TOKEN = "8294705765:AAGXgWlHrPDSASeW6I9Qen3RBN36eC6OMqU"
@@ -20,7 +21,8 @@ USERS_FILE = "users.json"
 MAX_PARTICIPANTS = 24
 
 # Валидация тега (УБРАНА ПРОВЕРКА НА 8 СИМВОЛОВ)
-TAG_REGEX = re.compile(r'^.+$') # Теперь тег просто не может быть пустым
+# Теперь тег просто не может быть пустым
+TAG_REGEX = re.compile(r'^.+$') 
 
 def load_list(filename):
     participants = []
@@ -57,7 +59,7 @@ def save_users(users):
     with open(USERS_FILE, 'w', encoding='utf-8') as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
 
-# Загрузка данных
+# Загрузка данных при старте
 participants_list = load_list(MAIN_FILE)
 reserve_list = load_list(RESERVE_FILE)
 users_db = load_users()
@@ -80,7 +82,7 @@ def get_user_nickname(user_id: int):
 def get_main_keyboard(user_id: int):
     user_nick = get_user_nickname(user_id)
     
-    # Защита от падений, если ник не найден
+    # Защита от ошибок, если ник еще не записан
     if user_nick is None:
         in_main = False
         in_reserve = False
@@ -263,7 +265,7 @@ async def process_tag(message: types.Message, state: FSMContext):
 
     await message.answer(f"✅ Регистрация прошла успешно! Вы под номером {participant_number}.")
     
-    # ИСПРАВЛЕНО: Гарантированный возврат в меню
+    # ВОЗВРАТ В МЕНЮ (исправлено)
     await state.clear()
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("Выберите действие:", reply_markup=keyboard)
@@ -281,8 +283,8 @@ async def add_to_reserve_logic(message: types.Message, nickname=None, tag=None):
         
         await message.answer(f"✅ Вы добавлены в резерв под номером {reserve_number}.")
         
-        # ИСПРАВЛЕНО: Гарантированный возврат в меню
-        await state.finish() if hasattr(message, 'state') else None
+        # ВОЗВРАТ В МЕНЮ (исправлено)
+        await state.clear()
         keyboard = get_main_keyboard(message.from_user.id)
         await message.answer("Выберите действие:", reply_markup=keyboard)
         return
@@ -329,7 +331,7 @@ async def reserve_tag(message: types.Message, state: FSMContext):
 
     await message.answer(f"✅ Вы добавлены в резерв под номером {reserve_number}.")
     
-    # ИСПРАВЛЕНО: Гарантированный возврат в меню
+    # ВОЗВРАТ В МЕНЮ (исправлено)
     await state.clear()
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("Выберите действие:", reply_markup=keyboard)
