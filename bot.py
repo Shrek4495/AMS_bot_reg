@@ -2,12 +2,13 @@ import asyncio
 import os
 import re
 import json
-from aiogram import Bot, Dispatcher, types, executor
-from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.dispatcher.filters import Text
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 API_TOKEN = "8968729833:AAGJbrjRAHIrc1VIu7HDWQt8tZbBkOKASis"
 ADMIN_IDS = {6723183204}  # Замените на свой Telegram ID
@@ -18,7 +19,7 @@ RESERVE_FILE = "reserve.txt"
 USERS_FILE = "users.json"
 MAX_PARTICIPANTS = 24
 
-# Валидация тега (8 символов: цифры и заглавные латинские буквы)
+# Валидация тега
 TAG_REGEX = re.compile(r'^[0-9A-Z]{8}$')
 
 def load_list(filename):
@@ -56,14 +57,14 @@ def save_users(users):
     with open(USERS_FILE, 'w', encoding='utf-8') as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
 
-# Загрузка данных при старте бота
+# Загрузка данных
 participants_list = load_list(MAIN_FILE)
 reserve_list = load_list(RESERVE_FILE)
 users_db = load_users()
 
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
+dp = Dispatcher(storage=storage)
 
 class Registration(StatesGroup):
     waiting_for_nickname = State()
@@ -81,37 +82,36 @@ def get_main_keyboard(user_id: int):
     in_main = any(p for p in participants_list if p['nickname'] == user_nick)
     in_reserve = any(r for r in reserve_list if r['nickname'] == user_nick)
 
-    buttons = []
+    builder = InlineKeyboardBuilder()
     if not in_main and not in_reserve:
-        buttons.append([InlineKeyboardButton(text="📝 В основной список", callback_data="register_start")])
-        buttons.append([InlineKeyboardButton(text="➡️ Сразу в резерв", callback_data="reserve_start")])
+        builder.button(text="📝 В основной список", callback_data="register_start")
+        builder.button(text="➡️ Сразу в резерв", callback_data="reserve_start")
     
-    buttons.append([InlineKeyboardButton(text="👥 Посмотреть список", callback_data="show_list")])
-    buttons.append([InlineKeyboardButton(text="🔄 Перезапустить меню", callback_data="user_restart")])
+    builder.button(text="👥 Посмотреть список", callback_data="show_list")
+    builder.button(text="🔄 Перезапустить меню", callback_data="user_restart")
+    
+    builder.adjust(1)
+    return builder.as_markup()
 
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-async def is_admin(message: types.Message):
-    if message.from_user.id in ADMIN_IDS:
-        return True
-    try:
-        member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-        # В aiogram 2.x статусы — это обычные СТРОКИ
-        return member.status in ["administrator", "creator"]
-    except Exception:
-        return False
-
-@dp.message_handler(commands=["start"])
+@dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    await dp.current_state(user=message.from_user.id).finish()
+    await dp.fsm.clear(user=message.from_user.id)
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("👋 Добро пожаловать в меню регистрации!", reply_markup=keyboard)
 
-@dp.message_handler(commands=["reload"])
+@dp.message(Command("reload"))
 async def cmd_reload(message: types.Message):
-    if not await is_admin(message):
-        await message.answer("❌ У вас нет прав для этой команды.")
-        return
+    # Проверка админа (в 3.x ChatMemberStatus импортируется из aiogram.types или aiogram.enums)
+    from aiogram.types import ChatMemberStatus
+    if message.from_user.id not in ADMIN_IDS:
+        try:
+            member = await message.chat.get_member(message.from_user.id)
+            if member.status not in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+                await message.answer("❌ У вас нет прав для этой команды.")
+                return
+        except Exception:
+            await message.answer("❌ Ошибка проверки прав.")
+            return
     
     global participants_list, reserve_list, users_db
     participants_list = load_list(MAIN_FILE)
@@ -119,11 +119,18 @@ async def cmd_reload(message: types.Message):
     users_db = load_users()
     await message.answer("✅ Данные перезагружены из файлов.")
 
-@dp.message_handler(commands=["clear"])
+@dp.message(Command("clear"))
 async def cmd_clear(message: types.Message):
-    if not await is_admin(message):
-        await message.answer("❌ У вас нет прав для этой команды.")
-        return
+    from aiogram.types import ChatMemberStatus
+    if message.from_user.id not in ADMIN_IDS:
+        try:
+            member = await message.chat.get_member(message.from_user.id)
+            if member.status not in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+                await message.answer("❌ У вас нет прав для этой команды.")
+                return
+        except Exception:
+            await message.answer("❌ Ошибка проверки прав.")
+            return
 
     global participants_list, reserve_list, users_db
     participants_list.clear()
@@ -136,11 +143,18 @@ async def cmd_clear(message: types.Message):
     
     await message.answer("✅ Все списки и база пользователей очищены.")
 
-@dp.message_handler(commands=["export"])
+@dp.message(Command("export"))
 async def cmd_export(message: types.Message):
-    if not await is_admin(message):
-        await message.answer("❌ У вас нет прав для этой команды.")
-        return
+    from aiogram.types import ChatMemberStatus
+    if message.from_user.id not in ADMIN_IDS:
+        try:
+            member = await message.chat.get_member(message.from_user.id)
+            if member.status not in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
+                await message.answer("❌ У вас нет прав для этой команды.")
+                return
+        except Exception:
+            await message.answer("❌ Ошибка проверки прав.")
+            return
 
     text = "🏆 ОСНОВНОЙ СОСТАВ:\n"
     if not participants_list:
@@ -158,14 +172,14 @@ async def cmd_export(message: types.Message):
             
     await message.answer(text)
 
-@dp.callback_query_handler(lambda c: c.data == "user_restart")
+@dp.callback_query(F.data == "user_restart")
 async def process_restart(callback: types.CallbackQuery):
     await callback.message.edit_text("🔄 Меню успешно перезапущено.")
-    await dp.current_state(user=callback.from_user.id).finish()
+    await dp.fsm.clear(user=callback.from_user.id)
     keyboard = get_main_keyboard(callback.from_user.id)
     await callback.message.answer("Выберите действие:", reply_markup=keyboard)
 
-@dp.callback_query_handler(lambda c: c.data == "show_list")
+@dp.callback_query(F.data == "show_list")
 async def process_show_list(callback: types.CallbackQuery):
     text = "🏆 ОСНОВНОЙ СОСТАВ (24 места):\n"
     if not participants_list:
@@ -183,7 +197,7 @@ async def process_show_list(callback: types.CallbackQuery):
 
     await callback.message.edit_text(text)
 
-@dp.callback_query_handler(lambda c: c.data == "register_start")
+@dp.callback_query(F.data == "register_start")
 async def process_register_button(callback: types.CallbackQuery):
     user_nick = get_user_nickname(callback.from_user.id)
     in_main = any(p for p in participants_list if p['nickname'] == user_nick)
@@ -194,9 +208,9 @@ async def process_register_button(callback: types.CallbackQuery):
         return
 
     await callback.message.edit_text("Введите ваш никнейм:")
-    await dp.current_state(user=callback.from_user.id).set_state(Registration.waiting_for_nickname.state)
+    await dp.fsm.set_state(Registration.waiting_for_nickname)
 
-@dp.callback_query_handler(lambda c: c.data == "reserve_start")
+@dp.callback_query(F.data == "reserve_start")
 async def process_reserve_button(callback: types.CallbackQuery):
     user_nick = get_user_nickname(callback.from_user.id)
     in_main = any(p for p in participants_list if p['nickname'] == user_nick)
@@ -208,9 +222,9 @@ async def process_reserve_button(callback: types.CallbackQuery):
 
     await callback.message.edit_text("Введите ваш никнейм для резервного списка:")
     await bot.send_chat_action(callback.message.chat.id, "typing")
-    await dp.current_state(user=callback.from_user.id).set_state(Reserve.waiting_for_nickname.state)
+    await dp.fsm.set_state(Reserve.waiting_for_nickname)
 
-@dp.message_handler(state=Registration.waiting_for_nickname)
+@dp.message(StateFilter(Registration.waiting_for_nickname))
 async def process_nickname(message: types.Message, state: FSMContext):
     nickname = message.text.strip()
     if not nickname:
@@ -218,9 +232,9 @@ async def process_nickname(message: types.Message, state: FSMContext):
         return
     await state.update_data(nickname=nickname)
     await message.answer(f"Никнейм: *{nickname}*\n\nТеперь введите ваш тег игрока.", parse_mode="Markdown")
-    await state.set_state(Registration.waiting_for_tag.state)
+    await state.set_state(Registration.waiting_for_tag)
 
-@dp.message_handler(state=Registration.waiting_for_tag)
+@dp.message(StateFilter(Registration.waiting_for_tag))
 async def process_tag(message: types.Message, state: FSMContext):
     tag = message.text.strip().upper()
     if not tag:
@@ -235,15 +249,15 @@ async def process_tag(message: types.Message, state: FSMContext):
     user_id = str(message.from_user.id)
 
     if any(p for p in participants_list if p['nickname'] == nickname):
-        await message.answer("❗ Никнейм уже занят в основном списке. Попробуйте другой.")
-        await state.finish()
+        await message.answer("❗ Никнейм уже занят в основном списке.")
+        await state.clear()
         keyboard = get_main_keyboard(message.from_user.id)
         await message.answer("Выберите действие:", reply_markup=keyboard)
         return
 
     if any(r for r in reserve_list if r['nickname'] == nickname):
         await message.answer("❗ Этот никнейм уже есть в резерве.")
-        await state.finish()
+        await state.clear()
         keyboard = get_main_keyboard(message.from_user.id)
         await message.answer("Выберите действие:", reply_markup=keyboard)
         return
@@ -251,15 +265,11 @@ async def process_tag(message: types.Message, state: FSMContext):
     if len(participants_list) >= MAX_PARTICIPANTS:
         await message.answer("❌ Места в основном составе закончились. Добавляем в резерв.")
         await add_to_reserve_logic(message, nickname, tag)
-        await state.finish()
+        await state.clear()
         return
 
     participant_number = len(participants_list) + 1
-    participant_entry = {
-        "number": participant_number,
-        "nickname": nickname,
-        "tag": tag
-    }
+    participant_entry = {"number": participant_number, "nickname": nickname, "tag": tag}
     participants_list.append(participant_entry)
     
     save_list(MAIN_FILE, participants_list)
@@ -267,7 +277,7 @@ async def process_tag(message: types.Message, state: FSMContext):
     save_users(users_db)
 
     await message.answer(f"✅ Регистрация прошла успешно! Вы под номером {participant_number}.")
-    await state.finish()
+    await state.clear()
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("Выберите действие:", reply_markup=keyboard)
 
@@ -287,9 +297,9 @@ async def add_to_reserve_logic(message: types.Message, nickname=None, tag=None):
 
     await message.answer("Введите ваш никнейм для резервного списка:")
     await bot.send_chat_action(message.chat.id, "typing")
-    await dp.current_state(user=message.from_user.id).set_state(Reserve.waiting_for_nickname.state)
+    await dp.fsm.set_state(Reserve.waiting_for_nickname)
 
-@dp.message_handler(state=Reserve.waiting_for_nickname)
+@dp.message(StateFilter(Reserve.waiting_for_nickname))
 async def reserve_nickname(message: types.Message, state: FSMContext):
     nickname = message.text.strip()
     if not nickname:
@@ -297,9 +307,9 @@ async def reserve_nickname(message: types.Message, state: FSMContext):
         return
     await state.update_data(nickname=nickname)
     await message.answer(f"Никнейм: *{nickname}*\n\nТеперь введите ваш тег игрока.", parse_mode="Markdown")
-    await state.set_state(Reserve.waiting_for_tag.state)
+    await state.set_state(Reserve.waiting_for_tag)
 
-@dp.message_handler(state=Reserve.waiting_for_tag)
+@dp.message(StateFilter(Reserve.waiting_for_tag))
 async def reserve_tag(message: types.Message, state: FSMContext):
     tag = message.text.strip().upper()
     if not tag:
@@ -315,7 +325,7 @@ async def reserve_tag(message: types.Message, state: FSMContext):
 
     if any(r for r in reserve_list if r['nickname'] == nickname):
         await message.answer("❗ Этот никнейм уже есть в резерве.")
-        await state.finish()
+        await state.clear()
         keyboard = get_main_keyboard(message.from_user.id)
         await message.answer("Выберите действие:", reply_markup=keyboard)
         return
@@ -329,10 +339,14 @@ async def reserve_tag(message: types.Message, state: FSMContext):
     save_users(users_db)
 
     await message.answer(f"✅ Вы добавлены в резерв под номером {reserve_number}.")
-    await state.finish()
+    await state.clear()
     
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("Выберите действие:", reply_markup=keyboard)
 
+async def main():
+    await dp.start_polling(bot)
+
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    # В aiogram 3.x вместо executor используется asyncio.run()
+    asyncio.run(main())
