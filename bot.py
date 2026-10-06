@@ -7,10 +7,10 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ChatMemberStatus
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-API_TOKEN = "8294705765:AAGXgWlHrPDSASeW6I9Qen3RBN36eC6OMqU"
+API_TOKEN = "8968729833:AAGJbrjRAHIrc1VIu7HDWQt8tZbBkOKASis"
 ADMIN_IDS = {6723183204}  # Замените на свой Telegram ID
 
 # Файлы для хранения данных
@@ -19,7 +19,7 @@ RESERVE_FILE = "reserve.txt"
 USERS_FILE = "users.json"
 MAX_PARTICIPANTS = 24
 
-# Валидация тега (8 символов: цифры и заглавные латинские буквы)
+# Валидация тега
 TAG_REGEX = re.compile(r'^[0-9A-Z]{8}$')
 
 def load_list(filename):
@@ -57,7 +57,7 @@ def save_users(users):
     with open(USERS_FILE, 'w', encoding='utf-8') as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
 
-# Загрузка данных при старте
+# Загрузка данных
 participants_list = load_list(MAIN_FILE)
 reserve_list = load_list(RESERVE_FILE)
 users_db = load_users()
@@ -93,23 +93,27 @@ def get_main_keyboard(user_id: int):
     builder.adjust(1)
     return builder.as_markup()
 
+async def is_admin(message: types.Message):
+    if message.from_user.id in ADMIN_IDS:
+        return True
+    try:
+        member = await message.chat.get_member(message.from_user.id)
+        return member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
+    except Exception:
+        return False
+
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    await dp.fsm.clear(user=message.from_user.id)
+async def cmd_start(message: types.Message, state: FSMContext):
+    # ИСПРАВЛЕНО: было dp.fsm.clear(...)
+    await state.clear() 
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("👋 Добро пожаловать в меню регистрации!", reply_markup=keyboard)
 
 @dp.message(Command("reload"))
 async def cmd_reload(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        try:
-            member = await message.chat.get_member(message.from_user.id)
-            if member.status not in ["administrator", "creator"]:
-                await message.answer("❌ У вас нет прав для этой команды.")
-                return
-        except Exception:
-            await message.answer("❌ Ошибка проверки прав.")
-            return
+    if not await is_admin(message):
+        await message.answer("❌ У вас нет прав для этой команды.")
+        return
     
     global participants_list, reserve_list, users_db
     participants_list = load_list(MAIN_FILE)
@@ -119,15 +123,9 @@ async def cmd_reload(message: types.Message):
 
 @dp.message(Command("clear"))
 async def cmd_clear(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        try:
-            member = await message.chat.get_member(message.from_user.id)
-            if member.status not in ["administrator", "creator"]:
-                await message.answer("❌ У вас нет прав для этой команды.")
-                return
-        except Exception:
-            await message.answer("❌ Ошибка проверки прав.")
-            return
+    if not await is_admin(message):
+        await message.answer("❌ У вас нет прав для этой команды.")
+        return
 
     global participants_list, reserve_list, users_db
     participants_list.clear()
@@ -142,15 +140,9 @@ async def cmd_clear(message: types.Message):
 
 @dp.message(Command("export"))
 async def cmd_export(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        try:
-            member = await message.chat.get_member(message.from_user.id)
-            if member.status not in ["administrator", "creator"]:
-                await message.answer("❌ У вас нет прав для этой команды.")
-                return
-        except Exception:
-            await message.answer("❌ Ошибка проверки прав.")
-            return
+    if not await is_admin(message):
+        await message.answer("❌ У вас нет прав для этой команды.")
+        return
 
     text = "🏆 ОСНОВНОЙ СОСТАВ:\n"
     if not participants_list:
@@ -169,9 +161,10 @@ async def cmd_export(message: types.Message):
     await message.answer(text)
 
 @dp.callback_query(F.data == "user_restart")
-async def process_restart(callback: types.CallbackQuery):
+async def process_restart(callback: types.CallbackQuery, state: FSMContext):
+    # ИСПРАВЛЕНО: было dp.fsm.clear(...)
+    await state.clear()
     await callback.message.edit_text("🔄 Меню успешно перезапущено.")
-    await dp.fsm.clear(user=callback.from_user.id)
     keyboard = get_main_keyboard(callback.from_user.id)
     await callback.message.answer("Выберите действие:", reply_markup=keyboard)
 
@@ -194,7 +187,7 @@ async def process_show_list(callback: types.CallbackQuery):
     await callback.message.edit_text(text)
 
 @dp.callback_query(F.data == "register_start")
-async def process_register_button(callback: types.CallbackQuery):
+async def process_register_button(callback: types.CallbackQuery, state: FSMContext):
     user_nick = get_user_nickname(callback.from_user.id)
     in_main = any(p for p in participants_list if p['nickname'] == user_nick)
     in_reserve = any(r for r in reserve_list if r['nickname'] == user_nick)
@@ -204,10 +197,10 @@ async def process_register_button(callback: types.CallbackQuery):
         return
 
     await callback.message.edit_text("Введите ваш никнейм:")
-    await dp.fsm.set_state(Registration.waiting_for_nickname)
+    await state.set_state(Registration.waiting_for_nickname)
 
 @dp.callback_query(F.data == "reserve_start")
-async def process_reserve_button(callback: types.CallbackQuery):
+async def process_reserve_button(callback: types.CallbackQuery, state: FSMContext):
     user_nick = get_user_nickname(callback.from_user.id)
     in_main = any(p for p in participants_list if p['nickname'] == user_nick)
     in_reserve = any(r for r in reserve_list if r['nickname'] == user_nick)
@@ -218,7 +211,7 @@ async def process_reserve_button(callback: types.CallbackQuery):
 
     await callback.message.edit_text("Введите ваш никнейм для резервного списка:")
     await bot.send_chat_action(callback.message.chat.id, "typing")
-    await dp.fsm.set_state(Reserve.waiting_for_nickname)
+    await state.set_state(Reserve.waiting_for_nickname)
 
 @dp.message(StateFilter(Registration.waiting_for_nickname))
 async def process_nickname(message: types.Message, state: FSMContext):
@@ -246,6 +239,7 @@ async def process_tag(message: types.Message, state: FSMContext):
 
     if any(p for p in participants_list if p['nickname'] == nickname):
         await message.answer("❗ Никнейм уже занят в основном списке.")
+        # ИСПРАВЛЕНО: было state.finish()
         await state.clear()
         keyboard = get_main_keyboard(message.from_user.id)
         await message.answer("Выберите действие:", reply_markup=keyboard)
@@ -253,6 +247,7 @@ async def process_tag(message: types.Message, state: FSMContext):
 
     if any(r for r in reserve_list if r['nickname'] == nickname):
         await message.answer("❗ Этот никнейм уже есть в резерве.")
+        # ИСПРАВЛЕНО: было state.finish()
         await state.clear()
         keyboard = get_main_keyboard(message.from_user.id)
         await message.answer("Выберите действие:", reply_markup=keyboard)
@@ -261,6 +256,7 @@ async def process_tag(message: types.Message, state: FSMContext):
     if len(participants_list) >= MAX_PARTICIPANTS:
         await message.answer("❌ Места в основном составе закончились. Добавляем в резерв.")
         await add_to_reserve_logic(message, nickname, tag)
+        # ИСПРАВЛЕНО: было state.finish()
         await state.clear()
         return
 
@@ -273,6 +269,7 @@ async def process_tag(message: types.Message, state: FSMContext):
     save_users(users_db)
 
     await message.answer(f"✅ Регистрация прошла успешно! Вы под номером {participant_number}.")
+    # ИСПРАВЛЕНО: было state.finish()
     await state.clear()
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("Выберите действие:", reply_markup=keyboard)
@@ -321,6 +318,7 @@ async def reserve_tag(message: types.Message, state: FSMContext):
 
     if any(r for r in reserve_list if r['nickname'] == nickname):
         await message.answer("❗ Этот никнейм уже есть в резерве.")
+        # ИСПРАВЛЕНО: было state.finish()
         await state.clear()
         keyboard = get_main_keyboard(message.from_user.id)
         await message.answer("Выберите действие:", reply_markup=keyboard)
@@ -335,15 +333,13 @@ async def reserve_tag(message: types.Message, state: FSMContext):
     save_users(users_db)
 
     await message.answer(f"✅ Вы добавлены в резерв под номером {reserve_number}.")
+    # ИСПРАВЛЕНО: было state.finish()
     await state.clear()
     
     keyboard = get_main_keyboard(message.from_user.id)
     await message.answer("Выберите действие:", reply_markup=keyboard)
 
-# ФУНКЦИЯ СБРОСА СТАРЫХ СЕССИЙ (РЕШЕНИЕ CONFLICT)
 async def on_startup(bot: Bot):
-    # Эта строка принудительно удаляет старый Webhook (если он был) 
-    # и сбрасывает все зависшие сессии getUpdates, вызывающие Conflict.
     await bot.delete_webhook(drop_pending_updates=True)
 
 async def main():
