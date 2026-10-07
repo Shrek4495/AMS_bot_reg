@@ -33,8 +33,10 @@ users_db = load_users()
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
+# ИЗМЕНЕНО: Регистронезависимый поиск тега, допускающий отсутствие пробела
 def parse_registration(text: str):
-    tag_match = re.search(r'Тег:(\S+)', text)
+    # Флаг re.IGNORECASE делает поиск нечувствительным к регистру (тег, Тег, ТЕГ)
+    tag_match = re.search(r'тег[:\s]*(\S+)', text, re.IGNORECASE)
     if not tag_match:
         return None, None
     
@@ -76,41 +78,35 @@ async def cmd_add_party(message: types.Message):
     except Exception:
         pass
 
-    # 1. СНАЧАЛА проверяем, есть ли пользователь в базе
     if user_id in users_db:
         user = users_db[user_id]
         
-        # Если пользователь просто написал "+пати" без данных
         if len(message.text.strip()) <= 5: 
             sent_message = await message.answer(f"{user['nickname']} Тег:{user['tag']}")
             users_db[user_id]['last_msg_id'] = sent_message.message_id
             save_users(users_db)
             return
             
-        # Если пользователь написал "+пати ...", пытаемся распарсить
         input_text = message.text[5:].strip()
         nickname, tag = parse_registration(input_text)
         
         if not nickname or not tag:
             await message.answer(
-                "❌ Неверный формат. Используйте команду с пробелом:\n"
-                "<code>+пати Никнейм Тег:ваш_тег</code>\n\n"
-                "Пример: <code>+пати Shrek Тег:qr2pk</code>"
+                "❌ Неверный формат. Пример: <code>+пати Shrek тег:qr2pk</code> (регистр и пробел не важны)"
             )
             return
 
+        # Проверка на русские буквы в теге оставлена
         if re.search(r'[а-яА-Я]', tag):
             await message.answer("❌ Тег не может содержать русские буквы.")
             return
 
-        # Проверяем, изменились ли данные
         if user['nickname'] == nickname and user['tag'] == tag:
             sent_message = await message.answer(f"{user['nickname']} Тег:{user['tag']}")
             users_db[user_id]['last_msg_id'] = sent_message.message_id
             save_users(users_db)
             return
         else:
-            # Обновляем данные
             user['nickname'] = nickname
             user['tag'] = tag
             save_users(users_db)
@@ -124,15 +120,12 @@ async def cmd_add_party(message: types.Message):
             save_users(users_db)
             return
 
-    # 2. Если пользователя НЕТ в базе — регистрация
     input_text = message.text[5:].strip()
     nickname, tag = parse_registration(input_text)
     
     if not nickname or not tag:
         await message.answer(
-            "❌ Неверный формат. Используйте команду с пробелом:\n"
-            "<code>+пати Никнейм Тег:ваш_тег</code>\n\n"
-            "Пример: <code>+пати Shrek Тег:qr2pk</code>"
+            "❌ Неверный формат. Пример: <code>+пати Shrek тег:qr2pk</code> (регистр и пробел не важны)"
         )
         return
 
