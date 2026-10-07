@@ -34,9 +34,6 @@ bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTM
 dp = Dispatcher()
 
 def parse_registration(text: str):
-    """
-    Парсит строку вида: Shrek Тег:qr2pk
-    """
     tag_match = re.search(r'Тег:(\S+)', text)
     if not tag_match:
         return None, None
@@ -55,10 +52,12 @@ async def cmd_start(message: types.Message):
     
     if user_id in users_db:
         user = users_db[user_id]
-        await message.answer(
-            f"👤 {user['nickname']}\n"
-            f"🏷 {user['tag']}"
-        )
+        # Сохраняем ID сообщения с данными
+        sent_message = await message.answer(f"{user['nickname']} Тег:{user['tag']}")
+        
+        # Сохраняем ID сообщения в базу рядом с данными пользователя
+        users_db[user_id]['last_msg_id'] = sent_message.message_id
+        save_users(users_db)
     else:
         await message.answer("Вы еще не зарегистрированы.")
 
@@ -66,29 +65,30 @@ async def cmd_start(message: types.Message):
         "ℹ️ <b>Инструкция:</b>\n\n"
         "Чтобы сохранить или посмотреть свои данные, введите:\n"
         "<code>+пати Никнейм Тег:ваш_тег</code>\n\n"
-        "Пример: <code>+пати Shrek Тег:qr2pk</code>"
+        "Пример: <code>+пати Shrek Тег:qr2pk</code>\n\n"
+        "Чтобы удалить сообщение с данными из чата:\n"
+        "<code>-пати</code>"
     )
 
 @dp.message(F.text.startswith("+пати"))
 async def cmd_add_party(message: types.Message):
     user_id = str(message.from_user.id)
 
-    # Удаляем сообщение пользователя
     try:
         await message.delete()
     except Exception:
         pass
 
-    # Если пользователь уже есть в базе — просто отдаем его данные БЕЗ лишнего текста
     if user_id in users_db:
         user = users_db[user_id]
-        await message.answer(
-            f"👤 {user['nickname']}\n"
-            f"🏷 {user['tag']}"
-        )
+        # Сохраняем ID нового сообщения с данными
+        sent_message = await message.answer(f"{user['nickname']} Тег:{user['tag']}")
+        
+        # Обновляем ID сообщения в базе
+        users_db[user_id]['last_msg_id'] = sent_message.message_id
+        save_users(users_db)
         return
 
-    # Если пользователя нет — регистрируем
     input_text = message.text[5:].strip()
     nickname, tag = parse_registration(input_text)
     
@@ -100,19 +100,43 @@ async def cmd_add_party(message: types.Message):
         )
         return
 
-    # Сохраняем в базу
     users_db[user_id] = {
         "nickname": nickname,
         "tag": tag
     }
     save_users(users_db)
 
-    # Отправляем подтверждение с данными
-    await message.answer(
-        f"✅ Регистрация прошла успешно!\n\n"
-        f"👤 {nickname}\n"
-        f"🏷 {tag}"
+    sent_message = await message.answer(
+        f"✅ Регистрация прошла успешно!\n"
+        f"{nickname} Тег:{tag}"
     )
+    
+    # Сохраняем ID сообщения для будущего удаления
+    users_db[user_id]['last_msg_id'] = sent_message.message_id
+    save_users(users_db)
+
+@dp.message(F.text.startswith("-пати"))
+async def cmd_remove_party(message: types.Message):
+    user_id = str(message.from_user.id)
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    if user_id in users_db and 'last_msg_id' in users_db[user_id]:
+        # Удаляем конкретное сообщение бота по его ID
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=users_db[user_id]['last_msg_id'])
+        except Exception:
+            # Если сообщение уже удалено или не найдено
+            pass
+        
+        # Опционально: удаляем ID из базы, чтобы нельзя было удалить его дважды
+        del users_db[user_id]['last_msg_id']
+        save_users(users_db)
+    else:
+        await message.answer("❗ У вас нет активного сообщения для удаления или вы не зарегистрированы.")
 
 # Админские команды (если нужны)
 
@@ -127,7 +151,7 @@ async def cmd_export(message: types.Message):
 
     text = "📋 БАЗА РЕГИСТРАЦИЙ:\n\n"
     for user_id, data in users_db.items():
-        text += f"ID: <code>{user_id}</code> | Ник: <b>{data['nickname']}</b> | Тег: <code>{data['tag']}</code>\n"
+        text += f"ID: <code>{user_id}</code> | {data['nickname']} Тег:{data['tag']}\n"
         
     await message.answer(text)
 
