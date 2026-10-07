@@ -8,6 +8,7 @@ from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 
 API_TOKEN = "8852961042:AAEnZDBLC_61l5hM1e0YJKsyEfw5w8xiw9Q"
+ADMIN_ID = 6723183204  # ID админа (оставьте, если нужны /admin_ команды)
 
 USERS_FILE = "users.json"
 
@@ -27,7 +28,6 @@ def save_users(users):
     except IOError as e:
         print(f"Ошибка записи в файл {USERS_FILE}: {e}")
 
-# Загрузка данных при старте
 users_db = load_users()
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -52,10 +52,7 @@ async def cmd_start(message: types.Message):
     
     if user_id in users_db:
         user = users_db[user_id]
-        # Сохраняем ID сообщения с данными
         sent_message = await message.answer(f"{user['nickname']} Тег:{user['tag']}")
-        
-        # Сохраняем ID сообщения в базу рядом с данными пользователя
         users_db[user_id]['last_msg_id'] = sent_message.message_id
         save_users(users_db)
     else:
@@ -63,14 +60,14 @@ async def cmd_start(message: types.Message):
 
     await message.answer(
         "ℹ️ <b>Инструкция:</b>\n\n"
-        "Чтобы сохранить или посмотреть свои данные, введите:\n"
+        "Чтобы сохранить или обновить свои данные, введите:\n"
         "<code>+пати Никнейм Тег:ваш_тег</code>\n\n"
         "Пример: <code>+пати Shrek Тег:qr2pk</code>\n\n"
-        "Чтобы удалить сообщение с данными из чата:\n"
+        "Чтобы попросить убрать вас с пати:\n"
         "<code>-пати</code>"
     )
 
-@dp.message(F.text.startswith("+пати"))
+@dp.message(F.text.lower().startswith("+пати"))
 async def cmd_add_party(message: types.Message):
     user_id = str(message.from_user.id)
 
@@ -79,16 +76,55 @@ async def cmd_add_party(message: types.Message):
     except Exception:
         pass
 
+    # 1. СНАЧАЛА проверяем, есть ли пользователь в базе
     if user_id in users_db:
         user = users_db[user_id]
-        # Сохраняем ID нового сообщения с данными
-        sent_message = await message.answer(f"{user['nickname']} Тег:{user['tag']}")
         
-        # Обновляем ID сообщения в базе
-        users_db[user_id]['last_msg_id'] = sent_message.message_id
-        save_users(users_db)
-        return
+        # Если пользователь просто написал "+пати" без данных
+        if len(message.text.strip()) <= 5: 
+            sent_message = await message.answer(f"{user['nickname']} Тег:{user['tag']}")
+            users_db[user_id]['last_msg_id'] = sent_message.message_id
+            save_users(users_db)
+            return
+            
+        # Если пользователь написал "+пати ...", пытаемся распарсить
+        input_text = message.text[5:].strip()
+        nickname, tag = parse_registration(input_text)
+        
+        if not nickname or not tag:
+            await message.answer(
+                "❌ Неверный формат. Используйте команду с пробелом:\n"
+                "<code>+пати Никнейм Тег:ваш_тег</code>\n\n"
+                "Пример: <code>+пати Shrek Тег:qr2pk</code>"
+            )
+            return
 
+        if re.search(r'[а-яА-Я]', tag):
+            await message.answer("❌ Тег не может содержать русские буквы.")
+            return
+
+        # Проверяем, изменились ли данные
+        if user['nickname'] == nickname and user['tag'] == tag:
+            sent_message = await message.answer(f"{user['nickname']} Тег:{user['tag']}")
+            users_db[user_id]['last_msg_id'] = sent_message.message_id
+            save_users(users_db)
+            return
+        else:
+            # Обновляем данные
+            user['nickname'] = nickname
+            user['tag'] = tag
+            save_users(users_db)
+            
+            sent_message = await message.answer(
+                f"✅ Данные успешно обновлены!\n"
+                f"👤 Ник: {nickname}\n"
+                f"🏷 Тег: {tag}"
+            )
+            users_db[user_id]['last_msg_id'] = sent_message.message_id
+            save_users(users_db)
+            return
+
+    # 2. Если пользователя НЕТ в базе — регистрация
     input_text = message.text[5:].strip()
     nickname, tag = parse_registration(input_text)
     
@@ -98,6 +134,10 @@ async def cmd_add_party(message: types.Message):
             "<code>+пати Никнейм Тег:ваш_тег</code>\n\n"
             "Пример: <code>+пати Shrek Тег:qr2pk</code>"
         )
+        return
+
+    if re.search(r'[а-яА-Я]', tag):
+        await message.answer("❌ Тег не может содержать русские буквы.")
         return
 
     users_db[user_id] = {
@@ -111,11 +151,10 @@ async def cmd_add_party(message: types.Message):
         f"{nickname} Тег:{tag}"
     )
     
-    # Сохраняем ID сообщения для будущего удаления
     users_db[user_id]['last_msg_id'] = sent_message.message_id
     save_users(users_db)
 
-@dp.message(F.text.startswith("-пати"))
+@dp.message(F.text.lower().startswith("-пати"))
 async def cmd_remove_party(message: types.Message):
     user_id = str(message.from_user.id)
 
@@ -124,25 +163,33 @@ async def cmd_remove_party(message: types.Message):
     except Exception:
         pass
 
-    if user_id in users_db and 'last_msg_id' in users_db[user_id]:
-        # Удаляем конкретное сообщение бота по его ID
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=users_db[user_id]['last_msg_id'])
-        except Exception:
-            # Если сообщение уже удалено или не найдено
-            pass
+    if user_id in users_db:
+        user = users_db[user_id]
         
-        # Опционально: удаляем ID из базы, чтобы нельзя было удалить его дважды
-        del users_db[user_id]['last_msg_id']
+        try:
+            await bot.send_message(
+                chat_id=message.chat.id, 
+                text=f"Пользователь просит убрать его с пати\n"
+                     f"👤 Ник: {user['nickname']}\n"
+                     f"🏷 Тег: {user['tag']}"
+            )
+        except Exception as e:
+            print(f"Не удалось отправить сообщение: {e}")
+        
+        if 'last_msg_id' in users_db[user_id]:
+            try:
+                await bot.delete_message(chat_id=message.chat.id, message_id=users_db[user_id]['last_msg_id'])
+                del users_db[user_id]['last_msg_id']
+            except Exception:
+                pass
+            
         save_users(users_db)
     else:
-        await message.answer("❗ У вас нет активного сообщения для удаления или вы не зарегистрированы.")
-
-# Админские команды (если нужны)
+        await message.answer("❗ Вы не зарегистрированы.")
 
 @dp.message(Command("admin_export"))
 async def cmd_export(message: types.Message):
-    if message.from_user.id not in {6723183204}:
+    if message.from_user.id != ADMIN_ID:
         return
 
     if not users_db:
@@ -157,7 +204,7 @@ async def cmd_export(message: types.Message):
 
 @dp.message(Command("admin_clear"))
 async def cmd_clear(message: types.Message):
-    if message.from_user.id not in {6723183204}:
+    if message.from_user.id != ADMIN_ID:
         return
 
     users_db.clear()
