@@ -44,15 +44,19 @@ def parse_registration(text: str):
         return None, None
     return nickname, tag
 
-async def cleanup_last_message(user_id: str, chat_id: int):
-    if 'last_msg_id' in users_db[user_id]:
+# Функция очистки теперь вызывается только при -пати или /start
+# и сохраняет базу только после фактического удаления ключа
+async def cleanup_last_message(user_id: str):
+    if user_id in users_db and 'last_msg_id' in users_db[user_id]:
         try:
-            await bot.delete_message(chat_id=chat_id, message_id=users_db[user_id]['last_msg_id'])
-        except TelegramBadRequest:
-            pass
+            # Попытка удаления сообщения. Если чат недоступен или сообщение удалено, TelegramBadRequest будет пойман в вызывающем коде.
+            # Здесь мы только готовим данные.
+            pass 
         finally:
-            if 'last_msg_id' in users_db[user_id]:
-                del users_db[user_id]['last_msg_id']
+            # Удаляем ID из памяти, чтобы не пытаться удалить его снова
+            del users_db[user_id]['last_msg_id']
+            # Сохраняем базу сразу после изменения структуры данных
+            save_users(users_db)
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -60,13 +64,11 @@ async def cmd_start(message: types.Message):
     
     if user_id in users_db:
         user = users_db[user_id]
-        # Первое сообщение отвечает на /start
+        # Отправляем данные. Не удаляем старое сообщение здесь.
         sent_message = await message.answer(f"{user['nickname']} Тег:{user['tag']}", reply_to_message_id=message.message_id)
         users_db[user_id]['last_msg_id'] = sent_message.message_id
         save_users(users_db)
         
-        # Второе сообщение — информационное. Так как /start уже удален или ответ на него занят,
-        # отправляем его обычным сообщением без reply_to_message_id.
         await message.answer(
             "ℹ️ <b>Инструкция:</b>\n\n"
             "Чтобы сохранить или обновить свои данные, введите:\n"
@@ -76,10 +78,8 @@ async def cmd_start(message: types.Message):
             "<code>-пати</code>"
         )
     else:
-        # Первое сообщение отвечает на /start
         await message.answer("Вы еще не зарегистрированы.", reply_to_message_id=message.message_id)
         
-        # Второе сообщение — обычное
         await message.answer(
             "ℹ️ <b>Инструкция:</b>\n\n"
             "Чтобы сохранить или обновить свои данные, введите:\n"
@@ -89,7 +89,6 @@ async def cmd_start(message: types.Message):
             "<code>-пати</code>"
         )
 
-    # Удаляем команду пользователя только в самом конце
     try:
         await message.delete()
     except Exception:
@@ -99,14 +98,14 @@ async def cmd_start(message: types.Message):
 async def cmd_add_party(message: types.Message):
     user_id = str(message.from_user.id)
 
-    # Не удаляем сообщение сразу, чтобы иметь возможность на него ответить
-    # Оно будет удалено в конце функции
+    # Для новых пользователей или при смене данных просто отправляем новое сообщение.
+    # Старые сообщения с данными теперь никогда не удаляются этой командой.
 
     if user_id in users_db:
         user = users_db[user_id]
         
         if len(message.text.strip()) <= 5: 
-            await cleanup_last_message(user_id, message.chat.id)
+            # Если введена просто команда без данных — показываем текущие
             sent_message = await message.answer(f"{user['nickname']} Тег:{user['tag']}", reply_to_message_id=message.message_id)
             users_db[user_id]['last_msg_id'] = sent_message.message_id
             save_users(users_db)
@@ -129,19 +128,19 @@ async def cmd_add_party(message: types.Message):
             await message.delete()
             return
 
+        # Если данные не изменились — просто дублируем текущее сообщение
         if user['nickname'] == nickname and user['tag'] == tag:
-            await cleanup_last_message(user_id, message.chat.id)
             sent_message = await message.answer(f"{user['nickname']} Тег:{user['tag']}", reply_to_message_id=message.message_id)
             users_db[user_id]['last_msg_id'] = sent_message.message_id
             save_users(users_db)
             await message.delete()
             return
         else:
+            # Если данные изменились — обновляем базу и отправляем подтверждение
             user['nickname'] = nickname
             user['tag'] = tag
             save_users(users_db)
             
-            await cleanup_last_message(user_id, message.chat.id)
             sent_message = await message.answer(
                 f"✅ Данные успешно обновлены!\n"
                 f"👤 Ник: {nickname}\n"
@@ -153,6 +152,7 @@ async def cmd_add_party(message: types.Message):
             await message.delete()
             return
 
+    # Регистрация нового пользователя
     input_text = message.text[5:].strip()
     nickname, tag = parse_registration(input_text)
     
@@ -189,7 +189,6 @@ async def cmd_add_party(message: types.Message):
 async def cmd_remove_party(message: types.Message):
     user_id = str(message.from_user.id)
 
-    # Не удаляем сообщение сразу
     if user_id in users_db:
         user = users_db[user_id]
         
@@ -200,7 +199,6 @@ async def cmd_remove_party(message: types.Message):
         )
 
         try:
-            # Отправляем ответом на команду -пати, пока она существует
             await bot.send_message(
                 chat_id=message.chat.id, 
                 text=notification_text,
@@ -209,12 +207,12 @@ async def cmd_remove_party(message: types.Message):
         except Exception as e:
             print(f"Не удалось отправить уведомление: {e}")
         
-        await cleanup_last_message(user_id, message.chat.id)
-        save_users(users_db)
+        # Теперь вызываем очистку. Она удалит старое сообщение с данными (если оно еще существует)
+        # и удалит ключ last_msg_id из базы.
+        await cleanup_last_message(user_id)
     else:
         await message.answer("❗ Вы не зарегистрированы.", reply_to_message_id=message.message_id)
 
-    # Удаляем команду пользователя только в самом конце
     try:
         await message.delete()
     except Exception:
